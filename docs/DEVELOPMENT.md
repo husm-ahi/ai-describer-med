@@ -1,6 +1,26 @@
-# AI Describer Medical - Development Environment
+# Development Guide
 
-## Quick Start
+このドキュメントは開発に参加する方向けの開発環境ガイドです。Docker Composeの開発用構成を前提としています。
+
+## 前提条件
+
+- Docker 20.10+ & Docker Compose 2.0+
+- AmiVoice APIキー
+- LLM APIキー（AWS Bedrock / OpenAI / Anthropic のいずれか）
+
+## クイックスタート
+
+### リポジトリのセットアップ
+
+```bash
+# 1. リポジトリをクローン
+git clone https://github.com/husm-ahi/ai-describer-med.git
+cd ai-describer-med
+
+# 2. 環境変数を設定
+cp .env.example .env
+nano .env  # APIキーなど必須項目を設定
+```
 
 ### 開発環境の起動
 
@@ -13,6 +33,14 @@ docker compose -f docker-compose.dev.yml logs -f backend
 
 # コンテナの停止
 docker compose -f docker-compose.dev.yml down
+```
+
+Makefileを使う場合：
+
+```bash
+make dev-up
+make dev-logs
+make dev-down
 ```
 
 ### 初回セットアップ
@@ -28,7 +56,7 @@ docker compose -f docker-compose.dev.yml exec backend python manage.py createsup
 docker compose -f docker-compose.dev.yml exec backend python manage.py collectstatic --noinput
 ```
 
-### 開発時の便利なコマンド
+## 便利なコマンド
 
 ```bash
 # Djangoシェルの起動
@@ -46,71 +74,114 @@ docker compose -f docker-compose.dev.yml exec redis redis-cli
 # マイグレーションファイルの作成
 docker compose -f docker-compose.dev.yml exec backend python manage.py makemigrations
 
-# コンテナ内でコマンド実行
+# コンテナ内でシェルを開く
 docker compose -f docker-compose.dev.yml exec backend bash
 ```
 
-### ホットリロード
-
-ソースコードの変更は自動的にコンテナ内に反映されます：
-- `backend/` ディレクトリ内のPythonファイルを編集すると、Daphneが自動的にリロードします
-- 変更がすぐに反映されない場合は、コンテナを再起動してください
-
-### 環境変数の設定
-
-`.env` ファイルを編集して環境変数を設定します：
+Makefile版：
 
 ```bash
-# .envファイルを編集
-nano .env
-
-# コンテナを再起動して変更を反映
-docker compose -f docker-compose.dev.yml restart backend
+make dev-shell
+make dev-migrate
+make dev-makemigrations
+make dev-test
+make db-shell
+make redis-cli
 ```
 
-### デバッグ
+## 開発環境の特徴
 
-コンテナ内でのデバッグ：
-
-```bash
-# バックエンドコンテナのログを表示
-docker compose -f docker-compose.dev.yml logs -f backend
-
-# エラー詳細を確認
-docker compose -f docker-compose.dev.yml exec backend python manage.py check --deploy
-```
-
-### クリーンアップ
-
-```bash
-# コンテナ停止と削除
-docker compose -f docker-compose.dev.yml down
-
-# ボリュームも含めて削除（データベースデータも削除されます）
-docker compose -f docker-compose.dev.yml down -v
-
-# イメージも削除
-docker compose -f docker-compose.dev.yml down --rmi all
-```
+- **ホットリロード**: ローカルのコードがコンテナ内にマウントされる
+- **ポート公開**: すべてのサービスポートが localhost に公開される
+  - Backend: http://localhost:8000
+  - PostgreSQL: localhost:5432
+  - Redis: localhost:6379
+- **開発用依存関係**: デバッグツールやテストライブラリが含まれる
 
 ## ディレクトリ構造
 
 ```
-.
-├── backend/              # Djangoアプリケーション（ホットリロード対象）
-│   ├── config/          # Django設定
-│   └── core/            # コアアプリケーション
-├── docker-compose.dev.yml  # 開発用Docker Compose
-├── Dockerfile.dev       # 開発用Dockerfile
-├── .env                 # 環境変数（Gitには含めない）
-└── manage.py            # Django管理スクリプト
+ai-describer-med/
+├── backend/                    # Djangoアプリケーション
+│   ├── config/                # Django設定
+│   │   ├── settings.py        # プロジェクト設定
+│   │   ├── urls.py            # URLルーティング
+│   │   └── asgi.py            # ASGI設定（Channels用）
+│   ├── core/                  # コアアプリケーション
+│   │   ├── models.py          # データベースモデル（SystemPrompt, LLMLog, AuditLog）
+│   │   ├── views.py           # ビュー（メイン画面、管理画面）
+│   │   ├── consumers.py       # WebSocketコンシューマー（AmiVoiceプロキシ）
+│   │   ├── middleware.py      # カスタムミドルウェア
+│   │   ├── services/          # ビジネスロジック
+│   │   │   └── llm_service.py # LLM統合サービス
+│   │   └── migrations/        # データベースマイグレーション
+│   ├── templates/             # HTMLテンプレート
+│   │   └── core/
+│   │       ├── index.html              # メイン画面
+│   │       ├── setup.html              # 初回セットアップ
+│   │       ├── admin_dashboard.html    # 管理ダッシュボード
+│   │       ├── manage_prompts.html     # プロンプト管理
+│   │       ├── view_logs.html          # ログ閲覧
+│   │       └── manage_users.html       # ユーザー管理
+│   └── static/                # 静的ファイル
+│       └── js/
+├── amivoice-api-client-library/ # AmiVoice APIライブラリ
+├── prototype_for_poc/          # プロトタイプコード（参考用）
+├── nginx/                      # Nginx設定
+│   ├── nginx.conf
+│   └── default.conf
+├── certs/                      # SSL/TLS証明書
+├── docs/                       # ドキュメント
+│   ├── DEVELOPMENT.md
+│   ├── ARCHITECTURE.md
+│   └── SECURITY.md
+├── docker-compose.yml          # 本番用Docker Compose
+├── docker-compose.dev.yml      # 開発用Docker Compose
+├── Dockerfile                  # 本番用Dockerfile
+├── Dockerfile.dev              # 開発用Dockerfile
+├── Makefile                    # タスク自動化
+├── pyproject.toml              # Python依存関係
+├── uv.lock                     # uvロックファイル
+├── .env.example                # 環境変数テンプレート
+├── REQUIREMENTS.md             # 詳細要件定義書
+├── CONTRIBUTING.md             # コントリビューションガイド
+└── README.md                   # プロジェクト概要
 ```
 
-## ポート
+## 環境変数の設定
 
-- `8000`: Django Backend (直接アクセス可能)
-- `5432`: PostgreSQL (ホストからアクセス可能)
-- `6379`: Redis (ホストからアクセス可能)
+[.env.example](../.env.example)ファイルをコピーして`.env`を作成し、各項目を設定してください。
+
+主な設定項目：
+- **Django設定**: ALLOWED_HOSTS, DJANGO_SECRET_KEY（自動生成可能）
+- **データベース**: PostgreSQL接続情報
+- **SSL/TLS**: 証明書の自動生成または組織CA証明書の設定
+- **AmiVoice API**: APIキー、エンドポイント、文法設定
+- **LLM設定**: AWS Bedrock, OpenAI, Anthropicのいずれかを選択
+- **セキュリティ**: HMAC秘密鍵（ユーザーID匿名化用）
+- **セッション**: タイムアウト時間（デフォルト3時間）
+
+詳細は[.env.example](../.env.example)を参照してください。
+
+## テスト
+
+```bash
+# すべてのテストを実行
+docker compose -f docker-compose.dev.yml exec backend python manage.py test
+
+# 特定のアプリのテストを実行
+docker compose -f docker-compose.dev.yml exec backend python manage.py test backend.core
+
+# カバレッジ付きでテスト実行
+docker compose -f docker-compose.dev.yml exec backend coverage run manage.py test
+docker compose -f docker-compose.dev.yml exec backend coverage report
+```
+
+Makefile版：
+
+```bash
+make dev-test
+```
 
 ## トラブルシューティング
 
