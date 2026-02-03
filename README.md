@@ -11,6 +11,8 @@ AI Describer Medicalは、医療従事者向けの音声入力システムです
 
 本システムはカルテシステムへの入力にQRコードを用いています。そのため、専用の機器や電子カルテシステムの改変を必要とせずに導入が可能です。
 
+<img src="./docs/Screenshot.png" alt="screenshot" width="400">
+
 ### 主な機能
 
 - 🎤 **音声認識**: AmiVoice APIによる高精度な医療用語認識（WebSocket経由）
