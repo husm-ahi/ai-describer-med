@@ -26,14 +26,16 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY pyproject.toml uv.lock README.md ./
 
 # 依存関係のインストール（仮想環境に）
+# プロジェクト自体はインストールせず、依存パッケージのみインストール
 RUN uv sync --frozen --no-dev --no-install-project
 
 # アプリケーションコードのコピー
 COPY backend ./backend
 COPY manage.py ./
 
-# プロジェクトパッケージのインストール
-RUN uv sync --frozen --no-dev --no-editable
+# プロジェクト自体のインストール（依存関係のキャッシュは保持）
+# editable modeではなく、通常のインストールを行う
+RUN uv pip install --no-deps .
 
 # ========================================
 # Stage 2: Runtime - 最小限のランタイムイメージ
