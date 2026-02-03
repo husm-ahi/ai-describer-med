@@ -1,0 +1,156 @@
+services:
+  # SSL Certificate Generator (runs once on startup)
+  cert-init:
+    image: alpine:latest
+    container_name: aimedical-cert-init-dev
+    volumes:
+      - ./certs:/certs
+    environment:
+      - SSL_CERT_PATH=${SSL_CERT_PATH:-}
+      - SSL_KEY_PATH=${SSL_KEY_PATH:-}
+      - SERVER_NAME=${SERVER_NAME:-localhost}
+      - SERVER_IPS=${SERVER_IPS:-}
+      - CERT_DIR=/certs
+    command: >
+      sh -c "
+        apk add --no-cache openssl bash &&
+        cp /certs/init-certs.sh /tmp/init-certs.sh &&
+        chmod +x /tmp/init-certs.sh &&
+        /tmp/init-certs.sh
+      "
+    restart: "no"
+
+  # PostgreSQL Database (Development)
+  db:
+    image: postgres:15-alpine
+    container_name: aimedical-db-dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aimedical}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-aimedical_db}
+    volumes:
+      - postgres_data_dev:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"  # Expose PostgreSQL port for local access
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aimedical}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aimedical-network
+
+  # Redis (for Django Channels Channel Layer) - Development
+  redis:
+    image: redis:7-alpine
+    container_name: aimedical-redis-dev
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data_dev:/data
+    ports:
+      - "6379:6379"  # Expose Redis port for local access
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aimedical-network
+
+  # Django Backend (Development with hot-reload)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: aimedical-backend-dev
+    restart: unless-stopped
+    command: >
+      sh -c "
+        echo 'Waiting for database...' &&
+        uv run python manage.py migrate &&
+        uv run python manage.py collectstatic --noinput &&
+        echo 'Starting development server with hot-reload...' &&
+        uv run daphne -b 0.0.0.0 -p 8000 backend.config.asgi:application
+      "
+    volumes:
+      # Mount source code for hot-reload
+      - ./backend:/app/backend:cached
+      - ./manage.py:/app/manage.py:cached
+      - ./pyproject.toml:/app/pyproject.toml:cached
+      - ./uv.lock:/app/uv.lock:cached
+      - ./.env:/app/.env:cached
+      # Don't mount .venv to avoid conflicts
+      - /app/.venv
+      # Static and media files
+      - static_files_dev:/app/staticfiles
+      - media_files_dev:/app/media
+    environment:
+      - DEBUG=True
+      - DJANGO_SETTINGS_MODULE=backend.config.settings
+      - POSTGRES_USER=${POSTGRES_USER:-aimedical}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-dev_password}
+      - POSTGRES_DB=${POSTGRES_DB:-aimedical_db}
+      - DB_HOST=db
+      - DB_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AMIVOICE_API_URL=${AMIVOICE_API_URL:-}
+      - AMIVOICE_API_KEY=${AMIVOICE_API_KEY:-}
+      - AMIVOICE_GRAMMAR=${AMIVOICE_GRAMMAR:--a-medical}
+      - LLM_MODEL=${LLM_MODEL}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_BEARER_TOKEN_BEDROCK=${AWS_BEARER_TOKEN_BEDROCK}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - HMAC_SECRET=${HMAC_SECRET:-dev_hmac_secret_key_for_development_only_change_in_production_min32chars}
+      - SESSION_TIMEOUT_HOURS=${SESSION_TIMEOUT_HOURS:-3}
+      - ALLOWED_HOSTS=localhost,127.0.0.1,backend
+    ports:
+      - "8000:8000"  # Expose backend port for direct access
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - aimedical-network
+
+  # Nginx (Development - for testing production-like setup with HTTPS)
+  frontend:
+    image: nginx:alpine
+    container_name: aimedical-frontend-dev
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+      - "8443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+      - static_files_dev:/var/www/static:ro
+      - media_files_dev:/var/www/media:ro
+      - ./certs:/etc/nginx/certs:ro
+    depends_on:
+      cert-init:
+        condition: service_completed_successfully
+      backend:
+        condition: service_started
+    networks:
+      - aimedical-network
+
+volumes:
+  postgres_data_dev:
+    driver: local
+  redis_data_dev:
+    driver: local
+  static_files_dev:
+    driver: local
+  media_files_dev:
+    driver: local
+
+networks:
+  aimedical-network:
+    driver: bridge

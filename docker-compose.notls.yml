@@ -1,0 +1,119 @@
+services:
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: aimedical-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aimedical}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: ${POSTGRES_DB:-aimedical_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aimedical}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aimedical-network
+
+  # Redis (for Django Channels Channel Layer)
+  redis:
+    image: redis:7-alpine
+    container_name: aimedical-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - aimedical-network
+
+  # Django Backend (with Daphne for ASGI + WebSocket)
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aimedical-backend
+    restart: unless-stopped
+    command: >
+      sh -c "
+        python manage.py migrate &&
+        python manage.py collectstatic --noinput &&
+        daphne -b 0.0.0.0 -p 8000 backend.asgi:application
+      "
+    volumes:
+      - ./backend:/app/backend
+      - static_files:/app/staticfiles
+      - media_files:/app/media
+    environment:
+      - DJANGO_SETTINGS_MODULE=backend.settings
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-aimedical}:${POSTGRES_PASSWORD:-changeme}@db:5432/${POSTGRES_DB:-aimedical_db}
+      - REDIS_URL=redis://redis:6379/0
+      - AMIVOICE_API_URL=${AMIVOICE_API_URL}
+      - AMIVOICE_API_KEY=${AMIVOICE_API_KEY}
+      - AMIVOICE_GRAMMAR=${AMIVOICE_GRAMMAR:--a-medical}
+      - LLM_MODEL=${LLM_MODEL:-bedrock/anthropic.claude-3-sonnet-20240229-v1:0}
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - HMAC_SECRET=${HMAC_SECRET}
+      - SESSION_TIMEOUT_HOURS=${SESSION_TIMEOUT_HOURS:-3}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - aimedical-network
+
+  # Nginx (Reverse Proxy + Static Files) - HTTP Only
+  frontend:
+    image: nginx:alpine
+    container_name: aimedical-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/default.notls.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend:/usr/share/nginx/html:ro
+      - static_files:/usr/share/nginx/html/static:ro
+      - media_files:/usr/share/nginx/html/media:ro
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - aimedical-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  static_files:
+    driver: local
+  media_files:
+    driver: local
+
+networks:
+  aimedical-network:
+    driver: bridge

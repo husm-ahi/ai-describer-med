@@ -1,0 +1,174 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理画面 - AI Describer Med</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .admin-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .admin-card {
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+            padding: 2rem;
+            margin-bottom: 2rem;
+        }
+        .stat-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            transition: transform 0.2s;
+        }
+        .stat-card:hover {
+            transform: translateY(-5px);
+        }
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+        }
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+        .menu-card {
+            border: 2px solid #667eea;
+            border-radius: 10px;
+            padding: 1.5rem;
+            text-align: center;
+            transition: all 0.3s;
+            cursor: pointer;
+            height: 100%;
+        }
+        .menu-card:hover {
+            background: #667eea;
+            color: white;
+            transform: scale(1.05);
+        }
+        .menu-card i {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        .audit-log-item {
+            border-left: 3px solid #667eea;
+            padding: 0.5rem 1rem;
+            margin-bottom: 0.5rem;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="{% url 'core:index' %}">
+                <i class="bi bi-activity"></i> AI Describer Med
+            </a>
+            <div class="navbar-nav ms-auto">
+                <span class="navbar-text me-3">
+                    <i class="bi bi-person-circle"></i> {{ user.username }} (管理者)
+                </span>
+                <a class="btn btn-outline-light btn-sm" href="{% url 'core:index' %}">
+                    <i class="bi bi-house"></i> メイン画面
+                </a>
+                <a class="btn btn-outline-danger btn-sm ms-2" href="{% url 'account_logout' %}">
+                    <i class="bi bi-box-arrow-right"></i> ログアウト
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="admin-container">
+        <div class="admin-card">
+            <h2 class="mb-4">
+                <i class="bi bi-speedometer2"></i> 管理ダッシュボード
+            </h2>
+
+            <!-- Statistics -->
+            <div class="row mb-4">
+                <div class="col-md-4">
+                    <div class="stat-card">
+                        <div class="stat-number">{{ total_users }}</div>
+                        <div class="stat-label">アクティブユーザー</div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="stat-card">
+                        <div class="stat-number">{{ total_logs }}</div>
+                        <div class="stat-label">LLMログ</div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="stat-card">
+                        <div class="stat-number">
+                            {% if active_prompt %}{{ active_prompt.version }}{% else %}未設定{% endif %}
+                        </div>
+                        <div class="stat-label">アクティブプロンプト</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Menu Cards -->
+            <h4 class="mb-3">管理メニュー</h4>
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="menu-card" onclick="location.href='{% url 'core:manage_prompts' %}'">
+                        <i class="bi bi-file-text"></i>
+                        <h5>システムプロンプト</h5>
+                        <p class="mb-0">プロンプト管理</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="menu-card" onclick="location.href='{% url 'core:view_logs' %}'">
+                        <i class="bi bi-clock-history"></i>
+                        <h5>LLMログ</h5>
+                        <p class="mb-0">ログ閲覧</p>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="menu-card" onclick="location.href='{% url 'core:manage_users' %}'">
+                        <i class="bi bi-people"></i>
+                        <h5>ユーザー管理</h5>
+                        <p class="mb-0">ユーザー一覧</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Recent Audit Logs -->
+        <div class="admin-card">
+            <h4 class="mb-3">
+                <i class="bi bi-journal-check"></i> 最近の監査ログ
+            </h4>
+            {% if recent_audit_logs %}
+                {% for log in recent_audit_logs %}
+                <div class="audit-log-item">
+                    <strong>{{ log.get_action_display }}</strong>
+                    <span class="text-muted">- {{ log.admin.username }}</span>
+                    {% if log.target_user %}
+                        <span class="text-muted">→ {{ log.target_user.username }}</span>
+                    {% endif %}
+                    <span class="text-muted float-end">{{ log.created_at|date:"Y-m-d H:i" }}</span>
+                </div>
+                {% endfor %}
+            {% else %}
+                <p class="text-muted">監査ログがありません</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

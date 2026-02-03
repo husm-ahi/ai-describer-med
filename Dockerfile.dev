@@ -1,0 +1,83 @@
+# syntax=docker/dockerfile:1
+
+# ========================================
+# Stage 1: Builder - 依存関係のインストール
+# ========================================
+FROM python:3.13-slim AS builder
+
+# 環境変数設定
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    UV_COMPILE_BYTECODE=0 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
+
+# 作業ディレクトリ設定
+WORKDIR /app
+
+# ビルドに必要なパッケージのインストール
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# uvのインストール
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# プロジェクトファイルのコピー（依存関係定義）
+COPY pyproject.toml uv.lock README.md ./
+
+# 依存関係のインストール（開発用パッケージを含む、仮想環境に）
+RUN uv sync --frozen --no-install-project
+
+# アプリケーションコードのコピー
+COPY backend ./backend
+COPY manage.py ./
+
+# プロジェクトパッケージのインストール
+RUN uv sync --frozen --no-editable
+
+# ========================================
+# Stage 2: Development Runtime
+# ========================================
+FROM python:3.13-slim AS runtime
+
+# 環境変数設定
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PATH="/app/.venv/bin:$PATH" \
+    VIRTUAL_ENV=/app/.venv
+
+# 作業ディレクトリ設定
+WORKDIR /app
+
+# ランタイムに必要なパッケージ（開発ツールを含む）
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    ca-certificates \
+    libpq5 \
+    git \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# 開発用ユーザー作成（COPY前に実行してchown -Rを回避）
+RUN useradd -m -u 1000 appuser && \
+    mkdir -p /app/staticfiles /app/media && \
+    chown -R appuser:appuser /app
+
+# uvのインストール（開発時のパッケージ追加用）
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# ビルダーステージから仮想環境をコピー（所有権を設定）
+COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
+
+# プロジェクトファイルをコピー（開発時の再インストール用、所有権を設定）
+COPY --from=builder --chown=appuser:appuser /app/pyproject.toml /app/uv.lock /app/README.md /app/
+
+USER appuser
+
+# ポート公開
+EXPOSE 8000
+
+# デフォルトコマンド（docker-compose.dev.ymlでオーバーライド）
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "backend.config.asgi:application"]

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>初期設定 - AI Describer Medical</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .setup-container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+        }
+        .setup-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .setup-header h1 {
+            color: #667eea;
+            font-size: 28px;
+            font-weight: bold;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+            padding: 12px;
+            font-weight: bold;
+        }
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #764ba2 0%, #667eea 100%);
+        }
+    </style>
+</head>
+<body>
+    <div class="setup-container">
+        <div class="setup-header">
+            <h1>🏥 AI Describer Medical</h1>
+            <p class="text-muted">初期セットアップ</p>
+        </div>
+        
+        <!-- Message Area -->
+        {% if messages %}
+        <div class="mb-3">
+            {% for message in messages %}
+            <div class="alert alert-{{ message.tags }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+        
+        {% if error %}
+        <div class="alert alert-danger alert-dismissible fade show" role="alert">
+            <i class="bi bi-exclamation-triangle-fill"></i> {{ error }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endif %}
+        
+        {% if success %}
+        <div class="alert alert-success alert-dismissible fade show" role="alert">
+            <i class="bi bi-check-circle-fill"></i> {{ success }}
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        {% endif %}
+        
+        <form method="post" id="setupForm">
+            {% csrf_token %}
+            
+            <div class="mb-3">
+                <label for="username" class="form-label">管理者ユーザー名</label>
+                <input type="text" class="form-control" id="username" name="username" required
+                       placeholder="admin" minlength="3" maxlength="150">
+                <div class="form-text">3文字以上、150文字以内で入力してください。</div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="password" class="form-label">パスワード</label>
+                <input type="password" class="form-control" id="password" name="password" required
+                       minlength="8" placeholder="8文字以上の安全なパスワード">
+                <div class="form-text">8文字以上で、推測されにくいパスワードを設定してください。</div>
+            </div>
+            
+            <div class="mb-3">
+                <label for="password_confirm" class="form-label">パスワード（確認）</label>
+                <input type="password" class="form-control" id="password_confirm" name="password_confirm" required
+                       minlength="8" placeholder="パスワードを再入力">
+            </div>
+            
+            <div class="alert alert-info" role="alert">
+                <strong>注意:</strong> この管理者アカウントでシステム全体を管理できます。
+                安全なパスワードを設定してください。
+            </div>
+            
+            <button type="submit" class="btn btn-primary w-100">管理者アカウントを作成</button>
+        </form>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Password validation
+        document.getElementById('setupForm').addEventListener('submit', function(e) {
+            const password = document.getElementById('password').value;
+            const passwordConfirm = document.getElementById('password_confirm').value;
+            
+            if (password !== passwordConfirm) {
+                e.preventDefault();
+                showMessage('パスワードが一致しません。もう一度確認してください。', 'danger');
+                return false;
+            }
+            
+            if (password.length < 8) {
+                e.preventDefault();
+                showMessage('パスワードは8文字以上で設定してください。', 'danger');
+                return false;
+            }
+        });
+        
+        // Show message function
+        function showMessage(message, type) {
+            const messageArea = document.querySelector('.setup-container');
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+            alertDiv.role = 'alert';
+            alertDiv.innerHTML = `
+                <i class="bi bi-exclamation-triangle-fill"></i> ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            `;
+            
+            const form = document.getElementById('setupForm');
+            messageArea.insertBefore(alertDiv, form);
+            
+            // Scroll to message
+            alertDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        };
+    </script>
+</body>
+</html>

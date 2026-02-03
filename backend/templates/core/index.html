@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Describer Medical - 音声入力</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #667eea;
+            --secondary-color: #764ba2;
+        }
+        
+        body {
+            background: #f8f9fa;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            color: white;
+            padding: 20px 0;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .main-container {
+            max-width: 1200px;
+            margin: 30px auto;
+            padding: 0 20px;
+        }
+        
+        .card {
+            border: none;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        
+        .record-btn {
+            width: 120px;
+            height: 120px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+            border: none;
+            color: white;
+            font-size: 48px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 20px auto;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        
+        .record-btn:hover {
+            transform: scale(1.05);
+        }
+        
+        .record-btn.recording {
+            background: #dc3545;
+            animation: pulse 1.5s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+        
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 5px;
+        }
+        
+        .status-connected {
+            background: #28a745;
+        }
+        
+        .status-disconnected {
+            background: #dc3545;
+        }
+        
+        #qrCode {
+            text-align: center;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        
+        #qrCode img {
+            max-width: 100%;
+            height: auto;
+        }
+        
+        .system-prompt {
+            background: #f8f9fa;
+            border-left: 4px solid var(--primary-color);
+            padding: 15px;
+            margin-top: 10px;
+            font-size: 14px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <div class="d-flex justify-content-between align-items-center">
+                <h1 class="mb-0"><i class="bi bi-hospital"></i> AI Describer Medical</h1>
+                <div>
+                    <span class="me-3">
+                        <span class="status-indicator status-disconnected" id="wsStatus"></span>
+                        <span id="statusText">未接続</span>
+                    </span>
+                    {% if user.is_staff %}
+                    <a href="{% url 'core:admin_dashboard' %}" class="btn btn-warning btn-sm me-2">
+                        <i class="bi bi-gear"></i> 管理画面
+                    </a>
+                    {% endif %}
+                    <a href="/accounts/logout/" class="btn btn-light btn-sm">
+                        <i class="bi bi-box-arrow-right"></i> ログアウト
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="row">
+            <!-- 左側: 音声入力エリア -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body text-center">
+                        <h5 class="card-title">音声入力</h5>
+                        <p class="text-muted">マイクボタンを押して録音を開始してください</p>
+                        
+                        <button id="recordBtn" class="record-btn">
+                            <i class="bi bi-mic-fill"></i>
+                        </button>
+                        
+                        <p id="recordStatus" class="text-muted">準備完了</p>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-2">
+                            <h6 class="card-title mb-0">認識結果</h6>
+                            <button id="sampleBtn" class="btn btn-outline-secondary btn-sm">
+                                <i class="bi bi-file-text"></i> サンプル挿入
+                            </button>
+                        </div>
+                        <textarea id="transcript" style="min-height: 150px; max-height: 300px; width: 100%; overflow-y: auto; background: #f8f9fa; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; font-family: inherit; font-size: inherit; resize: none;" placeholder="音声認識の結果がここに表示されます..."></textarea>
+                        <button id="processBtn" class="btn btn-primary w-100 mt-3">
+                            <i class="bi bi-cpu"></i> LLMで構造化
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 右側: QRコードエリア -->
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">構造化結果</h5>
+                        <div id="structuredResult" style="min-height: 200px; max-height: 400px; overflow-y: auto; background: #f8f9fa; padding: 15px; border-radius: 5px;">
+                            <p class="text-muted">LLM処理後の結果がここに表示されます...</p>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-body">
+                        <h5 class="card-title">QRコード</h5>
+                        <div id="qrCode" style="background: white; padding: 5px;">
+                            <p class="text-muted">QRコードがここに生成されます</p>
+                        </div>
+                        <div id="qrPagination" class="d-none mt-3">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <button id="qrPrevBtn" class="btn btn-secondary">
+                                    <i class="bi bi-chevron-left"></i> 前へ
+                                </button>
+                                <span id="qrPageInfo" class="text-muted"></span>
+                                <button id="qrNextBtn" class="btn btn-secondary">
+                                    次へ <i class="bi bi-chevron-right"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    {% load static %}
+    <script src="{% static 'js/qrcodegen-v1.8.0-es6.js' %}"></script>
+    <script src="{% static 'js/recorder.js' %}"></script>
+    <script src="{% static 'js/result.js' %}"></script>
+    <script src="{% static 'js/wrp.js' %}"></script>
+    <script>
+        // ========================================
+        // グローバル変数
+        // ========================================
+        let isRecording = false;
+        let recognizedText = '';
+        let structuredData = null;
+        let qrChunks = [];  // 分割されたQRコードデータ
+        let currentQrIndex = 0;  // 現在表示中のQRコードインデックス
+        const MAX_QR_LENGTH = 512;  // QRコード1つあたりの最大文字数
+
+        // サンプルテキスト
+        const SAMPLE_TEXT = `今日はどうされましたか。
+3日くらい前から咳が続いていて、微熱もあります。
+咳は一日中出ていますか、それとも時間帯で強くなりますか。
+夜になると特にひどくなります。
+喉の痛みや鼻水はありますか。
+喉は少し痛いですが、鼻水はあまり出ていません。
+痰は出ますか。
+朝方に少し出ます。黄色っぽい痰です。
+胸の痛みはありませんか。息苦しさはどうでしょう。
+胸の痛みはありません。息苦しさは少しあるかなという程度です。
+これまでにかかった病気で、何かありますか。
+花粉症があります。
+現在飲んでいるお薬はありますか。
+花粉症の時にアレグラを、たまに飲んでいます。
+薬のアレルギーはありますか。
+ペニシリン系の抗生剤で、以前発疹が出たことがあります。
+では、体温や血圧を測りますね。
+お願いします。
+体温は37.8度、血圧は118の74、脈は88、酸素の値は97％です。喉が少し赤くて、右下の肺で軽いラ音があります。
+そうですか。
+症状や所見からは上気道炎の可能性が高いですが、細菌感染を完全には否定できません。抗生剤を使うことも一つの選択肢です。
+抗生剤は必要でしょうか。
+ペニシリンにアレルギーがあるので、マクロライド系のクラリスロマイシンを使いましょう。咳止めと解熱鎮痛剤も一緒に処方します。
+分かりました。
+水分をしっかり取って、できるだけ安静にしてください。
+はい。
+2〜3日以内に熱が下がらない場合や、症状が悪くなる場合は、もう一度受診してください。`;
+
+        // 要素の取得
+        const recordBtn = document.getElementById('recordBtn');
+        const recordStatus = document.getElementById('recordStatus');
+        const transcriptDiv = document.getElementById('transcript');
+        const sampleBtn = document.getElementById('sampleBtn');
+        const processBtn = document.getElementById('processBtn');
+        const structuredResultDiv = document.getElementById('structuredResult');
+        const qrCodeDiv = document.getElementById('qrCode');
+        const qrPagination = document.getElementById('qrPagination');
+        const qrPrevBtn = document.getElementById('qrPrevBtn');
+        const qrNextBtn = document.getElementById('qrNextBtn');
+        const qrPageInfo = document.getElementById('qrPageInfo');
+        const wsStatus = document.getElementById('wsStatus');
+        const statusText = document.getElementById('statusText');
+
+        // ========================================
+        // AmiVoice Wrp.js イベントハンドラ
+        // ========================================
+        
+        // ログ出力
+        function log_(message) {
+            console.log('AmiVoice: ' + message);
+        }
+
+        // 音声認識サーバへの接続処理が開始した時
+        function connectStarted() {
+            log_('EVENT: connectStarted()');
+            wsStatus.className = 'status-indicator status-disconnected';
+            statusText.textContent = '接続中...';
+        }
+
+        // 音声認識サーバへの接続処理が完了した時
+        function connectEnded() {
+            log_('EVENT: connectEnded()');
+        }
+
+        // 音声認識サーバからの切断処理が開始した時
+        function disconnectStarted() {
+            log_('EVENT: disconnectStarted()');
+        }
+
+        // 音声認識サーバからの切断処理が完了した時
+        function disconnectEnded() {
+            log_('EVENT: disconnectEnded()');
+            deactivateRecordButton();
+        }
+
+        // 音声認識サーバへの音声データの供給開始処理が開始した時
+        function feedDataResumeStarted() {
+            log_('EVENT: feedDataResumeStarted()');
+        }
+
+        // 音声認識サーバへの音声データの供給開始処理が完了した時
+        function feedDataResumeEnded() {
+            log_('EVENT: feedDataResumeEnded()');
+            activateRecordButton();
+        }
+
+        // 音声認識サーバへの音声データの供給終了処理が開始した時
+        function feedDataPauseStarted() {
+            log_('EVENT: feedDataPauseStarted()');
+        }
+
+        // 音声認識サーバへの音声データの供給終了処理が完了した時
+        function feedDataPauseEnded(reason) {
+            log_('EVENT: feedDataPauseEnded(): reason[code[' + reason.code + '] message[' + reason.message + ']]');
+        }
+
+        // 発話区間の始端が検出された時
+        function utteranceStarted(startTime) {
+            log_('EVENT: utteranceStarted(): startTime[' + startTime + ']');
+        }
+
+        // 発話区間の終端が検出された時
+        function utteranceEnded(endTime) {
+            log_('EVENT: utteranceEnded(): endTime[' + endTime + ']');
+        }
+
+        // 認識処理が開始された時
+        function resultCreated() {
+            log_('EVENT: resultCreated()');
+        }
+
+        // 認識処理中（中間結果）
+        function resultUpdated(result) {
+            log_('EVENT: resultUpdated(): result[' + result + ']');
+            
+            const resultParsed = Result.parse(result);
+            const textRecognizedTemp = resultParsed.text ? resultParsed.text : "...";
+            
+            // 中間結果を表示（確定テキスト + 中間テキスト）
+            const currentText = recognizedText + textRecognizedTemp;
+            transcriptDiv.value = currentText;
+            
+            // スクロールを最下部まで移動
+            transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+        }
+
+        // 認識処理が確定した時（最終結果）
+        function resultFinalized(result) {
+            log_('EVENT: resultFinalized(): result[' + result + ']');
+            
+            const resultParsed = Result.parse(result);
+            const textRecognizedTemp = resultParsed.text ? resultParsed.text : "";
+            
+            // 確定テキストとして追加
+            recognizedText += textRecognizedTemp;
+            transcriptDiv.value = recognizedText;
+            
+            // スクロールを最下部まで移動
+            transcriptDiv.scrollTop = transcriptDiv.scrollHeight;
+            
+            // LLM処理ボタンを有効化
+            if (recognizedText.trim()) {
+                processBtn.disabled = false;
+            }
+        }
+
+        // 各種イベントが通知された時
+        function eventNotified(eventId, eventMessage) {
+            log_('EVENT: eventNotified(): eventId[' + eventId + '] eventMessage[' + eventMessage + ']');
+        }
+
+        // メッセージの出力が要求された時
+        function TRACE(message) {
+            log_(message);
+        }
+
+        // ========================================
+        // Wrp.js 設定
+        // ========================================
+        
+        // WebSocketエンドポイントの設定（Djangoのプロキシ経由）
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}/ws/amivoice/`;
+        
+        Wrp.name = "AmiVoice API (via Django Proxy)";
+        Wrp.serverURL = wsUrl;
+        Wrp.grammarFileNames = "";  // プロキシ側で設定されるため空
+        Wrp.authorization = "";      // プロキシ側で設定されるため空
+
+        // イベントハンドラの設定
+        Wrp.connectStarted = connectStarted;
+        Wrp.connectEnded = connectEnded;
+        Wrp.disconnectStarted = disconnectStarted;
+        Wrp.disconnectEnded = disconnectEnded;
+        Wrp.feedDataResumeStarted = feedDataResumeStarted;
+        Wrp.feedDataResumeEnded = feedDataResumeEnded;
+        Wrp.feedDataPauseStarted = feedDataPauseStarted;
+        Wrp.feedDataPauseEnded = feedDataPauseEnded;
+        Wrp.utteranceStarted = utteranceStarted;
+        Wrp.utteranceEnded = utteranceEnded;
+        Wrp.resultCreated = resultCreated;
+        Wrp.resultUpdated = resultUpdated;
+        Wrp.resultFinalized = resultFinalized;
+        Wrp.eventNotified = eventNotified;
+        Wrp.TRACE = TRACE;
+
+        // ========================================
+        // UI制御関数
+        // ========================================
+        
+        function activateRecordButton() {
+            isRecording = true;
+            recordBtn.classList.add('recording');
+            recordBtn.innerHTML = '<i class="bi bi-stop-fill"></i>';
+            recordStatus.textContent = '音声認識中...';
+            wsStatus.className = 'status-indicator status-connected';
+            statusText.textContent = '音声認識中...';
+        }
+
+        function deactivateRecordButton() {
+            isRecording = false;
+            recordBtn.classList.remove('recording');
+            recordBtn.innerHTML = '<i class="bi bi-mic-fill"></i>';
+            recordStatus.textContent = '準備完了';
+            wsStatus.className = 'status-indicator status-connected';
+            statusText.textContent = 'オンライン';
+        }
+
+        // WebSocket接続テスト（起動時のみ）
+        function testWebSocketConnection() {
+            const testWs = new WebSocket(wsUrl);
+            
+            testWs.onopen = () => {
+                console.log('WebSocket connection test: OK');
+                wsStatus.className = 'status-indicator status-connected';
+                statusText.textContent = 'オンライン';
+                // 接続確認できたらすぐ切断
+                testWs.close();
+            };
+            
+            testWs.onerror = (error) => {
+                console.error('WebSocket connection test failed:', error);
+                wsStatus.className = 'status-indicator status-disconnected';
+                statusText.textContent = '接続失敗';
+            };
+            
+            testWs.onclose = () => {
+                console.log('WebSocket connection test closed');
+            };
+        }
+
+        // ========================================
+        // サンプル挿入ボタン
+        // ========================================
+        
+        sampleBtn.addEventListener('click', () => {
+            transcriptDiv.value = SAMPLE_TEXT;
+            recognizedText = SAMPLE_TEXT;
+            processBtn.disabled = false;
+            // スクロールを最上部に移動
+            transcriptDiv.scrollTop = 0;
+        });
+
+        // ========================================
+        // 録音ボタン
+        // ========================================
+        
+        recordBtn.addEventListener('click', () => {
+            if (!isRecording) {
+                // 録音開始
+                recognizedText = transcriptDiv.value; // 現在のテキストを保持;
+                processBtn.disabled = true;
+                
+                // Wrp.jsで音声データの送信を開始
+                Wrp.feedDataResume();
+            } else {
+                // 録音停止
+                Wrp.feedDataPause();
+            }
+        });
+
+        // ========================================
+        // QRコード生成関数
+        // ========================================
+        
+        // Markdownテキストを改行で分割
+        function splitTextByLines(text, maxLength) {
+            const lines = text.split('\n');
+            const chunks = [];
+            let currentChunk = '';
+            
+            for (const line of lines) {
+                // 現在のチャンクに行を追加すると長すぎる場合
+                if (currentChunk.length + line.length + 1 > maxLength) {
+                    // 現在のチャンクを保存（空でない場合）
+                    if (currentChunk.trim()) {
+                        chunks.push(currentChunk.trim());
+                    }
+                    // 行自体が長すぎる場合は強制的に分割
+                    if (line.length > maxLength) {
+                        for (let i = 0; i < line.length; i += maxLength) {
+                            chunks.push(line.substring(i, i + maxLength));
+                        }
+                        currentChunk = '';
+                    } else {
+                        currentChunk = line;
+                    }
+                } else {
+                    // 追加可能
+                    currentChunk += (currentChunk ? '\n' : '') + line;
+                }
+            }
+            
+            // 最後のチャンクを追加
+            if (currentChunk.trim()) {
+                chunks.push(currentChunk.trim());
+            }
+            
+            return chunks.length > 0 ? chunks : [text];  // 最低1つは返す
+        }
+        
+        // QRコードを生成して表示
+        function generateQRCodes(data) {
+            // データを分割
+            qrChunks = splitTextByLines(data, MAX_QR_LENGTH);
+            currentQrIndex = 0;
+            
+            console.log(`QRコード生成: ${qrChunks.length}個に分割`);
+            
+            // QRコードを表示
+            displayQRCode(0);
+            
+            // ページネーションの表示/非表示
+            if (qrChunks.length > 1) {
+                qrPagination.classList.remove('d-none');
+            } else {
+                qrPagination.classList.add('d-none');
+            }
+        }
+        
+        // 指定インデックスのQRコードを表示
+        function displayQRCode(index) {
+            if (index < 0 || index >= qrChunks.length) return;
+            
+            currentQrIndex = index;
+            
+            // QRコードエリアをクリア
+            qrCodeDiv.innerHTML = '';
+            
+            try {
+                // Nayuki's QR Code generatorを使用してQRコードを生成
+                const qr = qrcodegen.QrCode.encodeText(
+                    qrChunks[index],
+                    qrcodegen.QrCode.Ecc.MEDIUM
+                );
+                
+                // SVGとして生成
+                const border = 1;
+                const lightColor = '#FFFFFF';
+                const darkColor = '#000000';
+                
+                const svg = toSvgString(qr, border, lightColor, darkColor);
+                qrCodeDiv.innerHTML = svg;
+                
+                // SVG要素のサイズ調整
+                const svgElement = qrCodeDiv.querySelector('svg');
+                if (svgElement) {
+                    svgElement.style.width = '300px';
+                    svgElement.style.height = '300px';
+                    svgElement.style.display = 'block';
+                    svgElement.style.margin = '0 auto';
+                }
+            } catch (error) {
+                console.error('QRコード生成エラー:', error);
+                qrCodeDiv.innerHTML = '<p class="text-danger">QRコード生成に失敗しました</p>';
+            }
+            
+            // ページ情報更新
+            if (qrChunks.length > 1) {
+                qrPageInfo.textContent = `${index + 1} / ${qrChunks.length}`;
+                qrPrevBtn.disabled = (index === 0);
+                qrNextBtn.disabled = (index === qrChunks.length - 1);
+            }
+        }
+
+        // QRコードをSVG文字列に変換するヘルパー関数
+        function toSvgString(qr, border, lightColor, darkColor) {
+            if (border < 0) throw new RangeError("Border must be non-negative");
+            const parts = [];
+            for (let y = 0; y < qr.size; y++) {
+                for (let x = 0; x < qr.size; x++) {
+                    if (qr.getModule(x, y))
+                        parts.push(`M${x + border},${y + border}h1v1h-1z`);
+                }
+            }
+            return `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 ${qr.size + border * 2} ${qr.size + border * 2}" stroke="none">
+	<rect width="100%" height="100%" fill="${lightColor}"/>
+	<path d="${parts.join(" ")}" fill="${darkColor}"/>
+</svg>`;
+        }
+        
+        // ========================================
+        // LLM処理ボタン
+        // ========================================
+        
+        processBtn.addEventListener('click', async () => {
+            recognizedText = transcriptDiv.value.trim();
+            
+            if (!recognizedText) {
+                alert('処理するテキストがありません。');
+                return;
+            }
+            
+            // 構造化結果エリアまでスムーズにスクロール
+            structuredResultDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            
+            processBtn.disabled = true;
+            processBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>処理中...';
+            structuredData = ''; // Reset
+            structuredResultDiv.innerHTML = '<pre></pre>';
+            
+            // タイプライター効果用の変数
+            let textBuffer = '';  // 受信したテキストのバッファ
+            let displayedText = '';  // 既に表示済みのテキスト
+            let typewriterInterval = null;
+            let isStreaming = true;
+            
+            // 1文字ずつ表示する関数
+            const startTypewriter = () => {
+                if (typewriterInterval) return;  // 既に実行中なら何もしない
+                
+                typewriterInterval = setInterval(() => {
+                    if (displayedText.length < textBuffer.length) {
+                        // まだ表示していない文字がある
+                        displayedText = textBuffer.substring(0, displayedText.length + 1);
+                        structuredResultDiv.querySelector('pre').textContent = displayedText;
+                        // スクロールを最下部まで移動
+                        structuredResultDiv.scrollTop = structuredResultDiv.scrollHeight;
+                    } else if (!isStreaming) {
+                        // ストリーミング終了 & 全て表示完了
+                        clearInterval(typewriterInterval);
+                        typewriterInterval = null;
+                        
+                        // 最終処理
+                        structuredData = displayedText;
+                        generateQRCodes(structuredData);
+                        
+                        // QRコード生成後、QRコードエリアまでスムーズにスクロール
+                        setTimeout(() => {
+                            qrCodeDiv.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                        }, 100);  // QRコード描画完了を待つための短い遅延
+                        
+                        processBtn.disabled = false;
+                        processBtn.innerHTML = '<i class="bi bi-cpu"></i> LLMで構造化';
+                    }
+                }, 5);  // 5ms間隔
+            };
+            
+            // WebSocket接続でストリーミング処理
+            const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${wsProtocol}//${window.location.host}/ws/llm/`;
+            
+            try {
+                const ws = new WebSocket(wsUrl);
+                
+                ws.onopen = () => {
+                    console.log('LLM WebSocket connected');
+                    // プロンプトを送信
+                    ws.send(JSON.stringify({ prompt: recognizedText }));
+                };
+                
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.error) {
+                        console.error('LLM Error:', data.error);
+                        alert('LLM処理中にエラーが発生しました: ' + data.error);
+                        const errorP = document.createElement('p');
+                        errorP.className = 'text-danger';
+                        errorP.textContent = 'エラー: ' + data.error;
+                        structuredResultDiv.innerHTML = '';
+                        structuredResultDiv.appendChild(errorP);
+                        if (data.done) {
+                            ws.close();
+                            if (typewriterInterval) clearInterval(typewriterInterval);
+                            processBtn.disabled = false;
+                            processBtn.innerHTML = '<i class="bi bi-cpu"></i> LLMで構造化';
+                        }
+                        return;
+                    }
+                    
+                    // ストリーミングチャンクをバッファに追加
+                    if (data.chunk) {
+                        textBuffer += data.chunk;
+                        // タイプライター効果開始
+                        startTypewriter();
+                    }
+                    
+                    // 処理完了
+                    if (data.done) {
+                        console.log('LLM processing completed');
+                        if (data.full_response) {
+                            textBuffer = data.full_response;
+                        }
+                        isStreaming = false;
+                        ws.close();
+                    }
+                };
+                
+                ws.onerror = (error) => {
+                    console.error('WebSocket error:', error);
+                    alert('WebSocket接続エラーが発生しました');
+                    if (typewriterInterval) clearInterval(typewriterInterval);
+                    processBtn.disabled = false;
+                    processBtn.innerHTML = '<i class="bi bi-cpu"></i> LLMで構造化';
+                };
+                
+                ws.onclose = () => {
+                    console.log('LLM WebSocket disconnected');
+                };
+                
+            } catch (error) {
+                console.error('Error:', error);
+                alert('LLM処理中にエラーが発生しました: ' + error.message);
+                const errorP = document.createElement('p');
+                errorP.className = 'text-danger';
+                errorP.textContent = 'エラー: ' + error.message;
+                structuredResultDiv.innerHTML = '';
+                structuredResultDiv.appendChild(errorP);
+                if (typewriterInterval) clearInterval(typewriterInterval);
+                processBtn.disabled = false;
+                processBtn.innerHTML = '<i class="bi bi-cpu"></i> LLMで構造化';
+            }
+        });
+
+        // ========================================
+        // QRコードページネーションボタン
+        // ========================================
+        
+        qrPrevBtn.addEventListener('click', () => {
+            if (currentQrIndex > 0) {
+                displayQRCode(currentQrIndex - 1);
+            }
+        });
+        
+        qrNextBtn.addEventListener('click', () => {
+            if (currentQrIndex < qrChunks.length - 1) {
+                displayQRCode(currentQrIndex + 1);
+            }
+        });
+
+        // ========================================
+        // 初期化
+        // ========================================
+        
+        // 接続テストのみ実行
+        testWebSocketConnection();
+    </script>
+</body>
+</html>
