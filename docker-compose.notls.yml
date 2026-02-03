@@ -39,6 +39,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      network: host
     container_name: aimedical-backend
     restart: unless-stopped
     command: >
