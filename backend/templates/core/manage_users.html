@@ -135,6 +135,9 @@
                                     {% endif %}
                                 </td>
                                 <td>
+                                    {% if u.is_staff and u.id != user.id and not user.is_superuser %}
+                                    <span class="text-muted small">管理者(superuser)のみ操作可</span>
+                                    {% else %}
                                     {% if u.is_active %}
                                     <button class="btn btn-sm btn-warning me-1" onclick="disableUser({{ u.id }}, '{{ u.username }}')">
                                         <i class="bi bi-dash-circle"></i> 無効化
@@ -161,6 +164,7 @@
                                         <button class="btn btn-sm btn-primary" onclick="promoteToStaff({{ u.id }}, '{{ u.username }}')">
                                             <i class="bi bi-arrow-up-circle"></i> スタッフへ昇格
                                         </button>
+                                    {% endif %}
                                     {% endif %}
                                 </td>
                             </tr>

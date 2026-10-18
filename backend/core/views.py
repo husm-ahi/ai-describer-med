@@ -47,6 +47,14 @@ def staff_required(view_func):
     return decorated_view
 
 
+def can_manage_account(actor, target):
+    """
+    Only superusers may manage other staff accounts.
+    Staff users can manage regular users and their own account.
+    """
+    return actor.is_superuser or not target.is_staff or actor.id == target.id
+
+
 def index(request):
     """
     Main page for voice input and QR code generation.
@@ -417,6 +425,9 @@ def manage_users(request):
             if user.is_superuser:
                 return JsonResponse({'error': 'スーパーユーザーは無効化できません'}, status=400)
             
+            if not can_manage_account(request.user, user):
+                return JsonResponse({'error': '他のスタッフアカウントは管理者（superuser）のみ操作できます'}, status=403)
+            
             # Disable user
             random_password = secrets.token_urlsafe(48)
             user.set_password(random_password)
@@ -435,6 +446,9 @@ def manage_users(request):
             user_id = request.POST.get('user_id')
             user = get_object_or_404(User, id=user_id)
             
+            if not can_manage_account(request.user, user):
+                return JsonResponse({'error': '他のスタッフアカウントは管理者（superuser）のみ操作できます'}, status=403)
+            
             user.is_active = True
             user.save()
             
@@ -450,6 +464,9 @@ def manage_users(request):
             user_id = request.POST.get('user_id')
             password = request.POST.get('password')
             user = get_object_or_404(User, id=user_id)
+            
+            if not can_manage_account(request.user, user):
+                return JsonResponse({'error': '他のスタッフアカウントは管理者（superuser）のみ操作できます'}, status=403)
             
             if user.is_superuser and user.id != request.user.id:
                 return JsonResponse({'error': '他の管理者のパスワードは変更できません'}, status=400)
@@ -498,6 +515,9 @@ def manage_users(request):
         elif action == 'demote_to_user':
             user_id = request.POST.get('user_id')
             user = get_object_or_404(User, id=user_id)
+            
+            if not can_manage_account(request.user, user):
+                return JsonResponse({'error': '他のスタッフアカウントは管理者（superuser）のみ操作できます'}, status=403)
             
             # superuserは降格不可
             if user.is_superuser:
