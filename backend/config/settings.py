@@ -206,6 +206,8 @@ AMIVOICE_GRAMMAR = os.getenv('AMIVOICE_GRAMMAR', '-a-medical')
 # LLM settings
 LLM_MODEL = os.getenv('LLM_MODEL', 'bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0')
 LITELLM_API_BASE = os.getenv('LITELLM_API_BASE', '')
+# Upper bound on prompt length accepted over the LLM WebSocket (limits cost abuse)
+LLM_MAX_PROMPT_CHARS = int(os.getenv('LLM_MAX_PROMPT_CHARS', '20000'))
 
 # AWS settings (for Bedrock)
 AWS_REGION = os.getenv('AWS_REGION', 'us-east-1')

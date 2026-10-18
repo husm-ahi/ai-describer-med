@@ -379,3 +379,174 @@ class TestManageUsers:
         user.refresh_from_db()
         assert user.is_staff is True
         assert user.is_superuser is False
+
+
+@pytest.mark.django_db
+class TestSecurityRegressions:
+    """Regression tests for security review findings."""
+
+    def test_setup_closed_when_only_non_superusers_exist(self, client, staff_user):
+        """Setup must not reopen just because no superuser remains."""
+        response = client.post('/setup/', {
+            'username': 'attacker',
+            'password': 'attackerpass123',
+            'password_confirm': 'attackerpass123'
+        })
+
+        assert response.status_code == 302
+        assert not User.objects.filter(username='attacker').exists()
+
+    def test_setup_rejects_missing_username(self, client, db):
+        response = client.post('/setup/', {
+            'password': 'testpass123',
+            'password_confirm': 'testpass123'
+        })
+
+        assert response.status_code == 200
+        assert User.objects.count() == 0
+
+    def test_promote_to_staff_cannot_strip_superuser(self, client, staff_user, admin_user):
+        client.force_login(staff_user)
+
+        response = client.post('/admin-dashboard/users/', {
+            'action': 'promote_to_staff',
+            'user_id': admin_user.id
+        })
+
+        assert response.status_code == 400
+        admin_user.refresh_from_db()
+        assert admin_user.is_superuser is True
+
+    def test_reset_password_rejects_empty_password(self, client, staff_user, user):
+        client.force_login(staff_user)
+
+        response = client.post('/admin-dashboard/users/', {
+            'action': 'reset_password',
+            'user_id': user.id,
+        })
+
+        assert response.status_code == 400
+        user.refresh_from_db()
+        assert user.check_password('testpass123')
+
+    def test_reset_password_rejects_weak_password(self, client, staff_user, user):
+        client.force_login(staff_user)
+
+        response = client.post('/admin-dashboard/users/', {
+            'action': 'reset_password',
+            'user_id': user.id,
+            'password': '12345678',
+        })
+
+        assert response.status_code == 400
+        user.refresh_from_db()
+        assert user.check_password('testpass123')
+
+    def test_reset_password_accepts_generated_password(self, client, staff_user, user):
+        client.force_login(staff_user)
+        password = generate_random_password()
+
+        response = client.post('/admin-dashboard/users/', {
+            'action': 'reset_password',
+            'user_id': user.id,
+            'password': password,
+        })
+
+        assert response.status_code == 200
+        user.refresh_from_db()
+        assert user.check_password(password)
+
+    def test_prompt_fields_not_rendered_into_inline_js(self, client, staff_user):
+        """Prompt version/content must not be able to break out into inline JavaScript."""
+        SystemPrompt.objects.create(
+            version="x');alert(1);//",
+            content='${alert(2)}`',
+            created_by=staff_user,
+        )
+        client.force_login(staff_user)
+
+        response = client.get('/admin-dashboard/prompts/')
+        html = response.content.decode()
+
+        assert "editPrompt(this)" in html
+        assert "alert(1)" not in html.split('editPrompt(')[1].split(')')[0]
+        assert 'data-version="x&#x27;);alert(1);//"' in html
+
+
+@pytest.mark.django_db
+class TestStaffAccountProtection:
+    """Only superusers may manage other staff accounts."""
+
+    @pytest.fixture
+    def other_staff(self, db):
+        return User.objects.create_user(
+            username='otherstaff',
+            password='otherstaffpass123',
+            is_staff=True,
+        )
+
+    @pytest.mark.parametrize('action, extra', [
+        ('disable', {}),
+        ('enable', {}),
+        ('reset_password', {'password': 'Xk7pQ2mZr9Lw'}),
+        ('demote_to_user', {}),
+    ])
+    def test_staff_cannot_manage_other_staff(self, client, staff_user, other_staff, action, extra):
+        client.force_login(staff_user)
+
+        response = client.post('/admin-dashboard/users/', {
+            'action': action,
+            'user_id': other_staff.id,
+            **extra,
+        })
+
+        assert response.status_code == 403
+        other_staff.refresh_from_db()
+        assert other_staff.is_staff is True
+        assert other_staff.is_active is True
+        assert other_staff.check_password('otherstaffpass123')
+
+    @pytest.mark.parametrize('action, extra', [
+        ('disable', {}),
+        ('reset_password', {'password': 'Xk7pQ2mZr9Lw'}),
+        ('demote_to_user', {}),
+    ])
+    def test_superuser_can_manage_staff(self, client, admin_user, other_staff, action, extra):
+        client.force_login(admin_user)
+
+        response = client.post('/admin-dashboard/users/', {
+            'action': action,
+            'user_id': other_staff.id,
+            **extra,
+        })
+
+        assert response.status_code == 200
+
+    def test_staff_can_reset_own_password(self, client, staff_user):
+        client.force_login(staff_user)
+
+        response = client.post('/admin-dashboard/users/', {
+            'action': 'reset_password',
+            'user_id': staff_user.id,
+            'password': 'Xk7pQ2mZr9Lw',
+        })
+
+        assert response.status_code == 200
+
+    def test_staff_can_still_manage_regular_users(self, client, staff_user, user):
+        client.force_login(staff_user)
+
+        response = client.post('/admin-dashboard/users/', {
+            'action': 'disable',
+            'user_id': user.id,
+        })
+
+        assert response.status_code == 200
+
+    def test_staff_rows_hide_actions_for_non_superuser(self, client, staff_user, other_staff, user):
+        client.force_login(staff_user)
+
+        html = client.get('/admin-dashboard/users/').content.decode()
+
+        assert f"disableUser({other_staff.id}," not in html
+        assert f"disableUser({user.id}," in html

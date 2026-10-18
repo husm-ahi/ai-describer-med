@@ -8,6 +8,8 @@ import secrets
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required, user_passes_test
 from django.contrib.auth import get_user_model
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.http import JsonResponse
 from django.views.decorators.http import require_http_methods
 from django.views.decorators.csrf import csrf_exempt
@@ -45,6 +47,14 @@ def staff_required(view_func):
     return decorated_view
 
 
+def can_manage_account(actor, target):
+    """
+    Only superusers may manage other staff accounts.
+    Staff users can manage regular users and their own account.
+    """
+    return actor.is_superuser or not target.is_staff or actor.id == target.id
+
+
 def index(request):
     """
     Main page for voice input and QR code generation.
@@ -61,16 +71,22 @@ def index(request):
 def setup(request):
     """
     Initial setup page for creating the first admin user.
-    Only accessible when no admin user exists.
+    Only accessible when no user exists at all.
     """
-    # Check if any superuser exists
-    if User.objects.filter(is_superuser=True).exists():
+    # Close setup as soon as any user exists. Checking only for superusers
+    # would reopen this unauthenticated page whenever no superuser remains.
+    if User.objects.exists():
         return redirect('/admin-dashboard/')
     
     if request.method == 'POST':
-        username = request.POST.get('username')
-        password = request.POST.get('password')
-        password_confirm = request.POST.get('password_confirm')
+        username = (request.POST.get('username') or '').strip()
+        password = request.POST.get('password') or ''
+        password_confirm = request.POST.get('password_confirm') or ''
+        
+        if not username:
+            return render(request, 'core/setup.html', {
+                'error': 'ユーザー名を入力してください。'
+            })
         
         # Validate password confirmation
         if password != password_confirm:
@@ -133,8 +149,9 @@ def setup(request):
             
             return redirect('/admin-dashboard/')
         except Exception as e:
+            logger.error(f"初期管理者作成エラー: {e}", exc_info=True)
             return render(request, 'core/setup.html', {
-                'error': f'ユーザーの作成に失敗しました: {str(e)}'
+                'error': 'ユーザーの作成に失敗しました。'
             })
     
     return render(request, 'core/setup.html')
@@ -297,7 +314,8 @@ def load_default_prompt(request):
     except FileNotFoundError:
         return JsonResponse({'error': 'デフォルトプロンプトファイルが見つかりません'}, status=404)
     except Exception as e:
-        return JsonResponse({'error': f'ファイル読み込みエラー: {str(e)}'}, status=500)
+        logger.error(f"デフォルトプロンプト読み込みエラー: {e}", exc_info=True)
+        return JsonResponse({'error': 'ファイル読み込みエラー'}, status=500)
 
 
 @staff_required
@@ -397,7 +415,8 @@ def manage_users(request):
                     'password': password  # Return generated password to display to admin
                 })
             except Exception as e:
-                return JsonResponse({'error': f'ユーザー作成に失敗しました: {str(e)}'}, status=500)
+                logger.error(f"ユーザー作成エラー: {e}", exc_info=True)
+                return JsonResponse({'error': 'ユーザー作成に失敗しました'}, status=500)
         
         elif action == 'disable':
             user_id = request.POST.get('user_id')
@@ -405,6 +424,9 @@ def manage_users(request):
             
             if user.is_superuser:
                 return JsonResponse({'error': 'スーパーユーザーは無効化できません'}, status=400)
+            
+            if not can_manage_account(request.user, user):
+                return JsonResponse({'error': '他のスタッフアカウントは管理者（superuser）のみ操作できます'}, status=403)
             
             # Disable user
             random_password = secrets.token_urlsafe(48)
@@ -424,6 +446,9 @@ def manage_users(request):
             user_id = request.POST.get('user_id')
             user = get_object_or_404(User, id=user_id)
             
+            if not can_manage_account(request.user, user):
+                return JsonResponse({'error': '他のスタッフアカウントは管理者（superuser）のみ操作できます'}, status=403)
+            
             user.is_active = True
             user.save()
             
@@ -440,8 +465,19 @@ def manage_users(request):
             password = request.POST.get('password')
             user = get_object_or_404(User, id=user_id)
             
+            if not can_manage_account(request.user, user):
+                return JsonResponse({'error': '他のスタッフアカウントは管理者（superuser）のみ操作できます'}, status=403)
+            
             if user.is_superuser and user.id != request.user.id:
                 return JsonResponse({'error': '他の管理者のパスワードは変更できません'}, status=400)
+            
+            if not password:
+                return JsonResponse({'error': 'パスワードを入力してください'}, status=400)
+            
+            try:
+                validate_password(password, user=user)
+            except ValidationError as e:
+                return JsonResponse({'error': ' '.join(e.messages)}, status=400)
             
             # Use password from admin (generated or modified)
             user.set_password(password)
@@ -459,6 +495,10 @@ def manage_users(request):
             user_id = request.POST.get('user_id')
             user = get_object_or_404(User, id=user_id)
             
+            # superuserに対して実行すると is_superuser が外れてしまうため拒否
+            if user.is_superuser:
+                return JsonResponse({'error': '管理者（superuser）は変更できません'}, status=400)
+            
             # 一般ユーザー → スタッフ
             user.is_staff = True
             user.is_superuser = False
@@ -475,6 +515,9 @@ def manage_users(request):
         elif action == 'demote_to_user':
             user_id = request.POST.get('user_id')
             user = get_object_or_404(User, id=user_id)
+            
+            if not can_manage_account(request.user, user):
+                return JsonResponse({'error': '他のスタッフアカウントは管理者（superuser）のみ操作できます'}, status=403)
             
             # superuserは降格不可
             if user.is_superuser:

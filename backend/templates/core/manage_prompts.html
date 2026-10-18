@@ -103,7 +103,7 @@
                                 <i class="bi bi-check-circle"></i> 有効化
                             </button>
                             {% endif %}
-                            <button class="btn btn-sm btn-primary" onclick="editPrompt({{ prompt.id }}, '{{ prompt.version }}', `{{ prompt.content|escapejs }}`)">
+                            <button class="btn btn-sm btn-primary" data-prompt-id="{{ prompt.id }}" data-version="{{ prompt.version }}" data-content="{{ prompt.content }}" onclick="editPrompt(this)">
                                 <i class="bi bi-pencil"></i> 編集
                             </button>
                             {% if not prompt.is_active %}
@@ -243,10 +243,12 @@
             });
         }
 
-        function editPrompt(id, version, content) {
-            document.getElementById('editPromptId').value = id;
-            document.getElementById('editVersion').value = version;
-            document.getElementById('edit_content').value = content;
+        function editPrompt(button) {
+            // Read values from data attributes (HTML-escaped by the template)
+            // instead of interpolating them into inline JavaScript.
+            document.getElementById('editPromptId').value = button.dataset.promptId;
+            document.getElementById('editVersion').value = button.dataset.version;
+            document.getElementById('edit_content').value = button.dataset.content;
             new bootstrap.Modal(document.getElementById('editPromptModal')).show();
         }
 

@@ -106,3 +106,47 @@ class TestConsumerConfiguration:
         assert inspect.iscoroutinefunction(AmiVoiceProxyConsumer.connect)
         assert inspect.iscoroutinefunction(AmiVoiceProxyConsumer.disconnect)
         assert inspect.iscoroutinefunction(AmiVoiceProxyConsumer.receive)
+
+
+@pytest.mark.asyncio
+@pytest.mark.django_db
+class TestLLMConsumer:
+    """Tests for LLMConsumer input handling."""
+
+    async def _communicator(self, user):
+        from channels.testing import WebsocketCommunicator
+        from backend.core.consumers import LLMConsumer
+
+        communicator = WebsocketCommunicator(LLMConsumer.as_asgi(), "/ws/llm/")
+        communicator.scope['user'] = user
+        connected, _ = await communicator.connect()
+        assert connected
+        return communicator
+
+    async def test_rejects_too_long_prompt(self, user, settings):
+        settings.LLM_MAX_PROMPT_CHARS = 10
+        communicator = await self._communicator(user)
+
+        with patch('backend.core.services.llm_service.process_with_llm_stream') as mock_stream:
+            await communicator.send_json_to({'prompt': 'a' * 11})
+            response = await communicator.receive_json_from(timeout=1)
+            mock_stream.assert_not_called()
+
+        assert response['done'] is True
+        assert 'too long' in response['error']
+        await communicator.disconnect()
+
+    async def test_error_details_not_exposed(self, user):
+        communicator = await self._communicator(user)
+
+        async def failing_stream(*args, **kwargs):
+            raise RuntimeError('secret internal detail')
+            yield  # pragma: no cover
+
+        with patch('backend.core.services.llm_service.process_with_llm_stream', failing_stream):
+            await communicator.send_json_to({'prompt': 'hello'})
+            response = await communicator.receive_json_from(timeout=1)
+
+        assert response['done'] is True
+        assert 'secret internal detail' not in response['error']
+        await communicator.disconnect()
