@@ -147,9 +147,16 @@ class LLMConsumer(AsyncWebsocketConsumer):
             data = json.loads(text_data)
             user_prompt = data.get('prompt', '')
             
-            if not user_prompt:
+            if not user_prompt or not isinstance(user_prompt, str):
                 await self.send(text_data=json.dumps({
                     'error': 'Prompt is required',
+                    'done': True
+                }))
+                return
+            
+            if len(user_prompt) > settings.LLM_MAX_PROMPT_CHARS:
+                await self.send(text_data=json.dumps({
+                    'error': 'Prompt is too long',
                     'done': True
                 }))
                 return
@@ -167,8 +174,9 @@ class LLMConsumer(AsyncWebsocketConsumer):
                 'done': True
             }))
         except Exception as e:
-            logger.error(f"Error in LLM processing: {e}")
+            logger.error(f"Error in LLM processing: {e}", exc_info=True)
+            # Do not expose internal error details to the client
             await self.send(text_data=json.dumps({
-                'error': str(e),
+                'error': 'LLM processing failed',
                 'done': True
             }))

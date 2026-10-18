@@ -203,8 +203,9 @@ async def process_with_llm_stream(user, user_prompt: str) -> AsyncGenerator[Dict
         }
         
     except Exception as e:
-        logger.error(f"LLM streaming failed: {e}")
+        logger.error(f"LLM streaming failed: {e}", exc_info=True)
+        # Provider errors may include request details; keep them in server logs only
         yield {
-            'error': str(e),
+            'error': 'LLM processing failed',
             'done': True
         }
